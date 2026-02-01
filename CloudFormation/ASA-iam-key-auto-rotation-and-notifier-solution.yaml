@@ -250,8 +250,29 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMFullAccess"
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2FullAccess"
+      Policies:
+        - PolicyName: AllowSSMParameterAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AllowSSMParameterRead
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/iam-key-rotation/*'
+        - PolicyName: AllowVPCAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AllowVPCNetworkInterface
+                Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: '*'
       Policies:
         - PolicyName: AllowNotiferToGetEmailTemplate
           PolicyDocument:
@@ -319,7 +340,6 @@ Resources:
       Path: /
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2FullAccess"
       Policies:
         - PolicyName: AllowRotationFunctionPermissions
           PolicyDocument:
@@ -338,6 +358,16 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !GetAtt NotifierLambdaFunction.Arn
+        - PolicyName: AllowVPCAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: '*'
         - PolicyName: AllowSecretsManagerPermissions
           PolicyDocument:
             Version: "2012-10-17"
@@ -423,7 +453,6 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2FullAccess"
       Policies:
         - PolicyName: AllowAWSOrgAccess
           PolicyDocument:
@@ -437,6 +466,16 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !GetAtt AccessKeyRotateLambdaFunction.Arn
+        - PolicyName: AllowVPCAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: '*'
    AccountInventoryLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-01
+
+### Security
+- Replaced overly permissive managed policies (AmazonSSMFullAccess, AmazonEC2FullAccess) with least privilege inline policies
+- Added scoped SSM parameter access for SMTP credentials
+- Added minimal VPC network interface permissions
+
+### Fixed
+- Fixed bare `except` clause in account_scan.py (now catches `Exception`)
+- Fixed potential `None` error in config.py when `CredentialReplicationRegions` is not set
+- Fixed missing `org_client` argument in recursive `list_aws_accounts_for_ou()` call
+
 ## [1.1.0] - 2026-02-01
 
 ### Added
