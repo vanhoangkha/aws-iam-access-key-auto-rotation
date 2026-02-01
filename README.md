@@ -26,11 +26,7 @@ Automated AWS IAM access key rotation solution using Lambda, Secrets Manager, an
 
 ## Architecture
 
-```
-EventBridge (24h) → Account Inventory Lambda → Key Rotation Lambda → Secrets Manager
-                                                       ↓
-                                              Notifier Lambda (SES)
-```
+![Architecture Diagram](docs/architecture.png)
 
 ## Prerequisites
 
