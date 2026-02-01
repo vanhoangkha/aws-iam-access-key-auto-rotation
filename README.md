@@ -1,20 +1,173 @@
-## AWS IAM Key Rotation
-This set of CloudFormation templates and Python scripts will set up an auto-rotation function that will automatically rotate your AWS IAM User Access Keys every 90 days. At 100 days it will then disable the old Access Keys. And finally at 110 days it will delete the old Access Keys. It will also set up a secret inside AWS Secrets Manager to store the new Access Keys, with a resource policy that permits only the AWS IAM User access to them. There is also automation to send emails with a custome email template via SES that will alert account owners when rotation occurs. 
+# AWS IAM Access Key Auto-Rotation
+
+Automated solution for rotating AWS IAM User Access Keys following security best practices.
+
+## Overview
+
+This solution automatically manages IAM Access Key lifecycle:
+
+| Day | Action |
+|-----|--------|
+| 90 | Rotate - Create new key, store in Secrets Manager |
+| 100 | Disable - Deactivate old key |
+| 110 | Delete - Remove old key permanently |
+
+## Architecture
+
+```
+┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
+│  EventBridge    │────▶│  Account Inventory   │────▶│  Key Rotation   │
+│  (24h schedule) │     │  Lambda              │     │  Lambda         │
+└─────────────────┘     └──────────────────────┘     └────────┬────────┘
+                                                              │
+                        ┌──────────────────────┐              │
+                        │  Notifier Lambda     │◀─────────────┤
+                        │  (SES Email)         │              │
+                        └──────────────────────┘              ▼
+                                                     ┌─────────────────┐
+                                                     │ Secrets Manager │
+                                                     │ (New Keys)      │
+                                                     └─────────────────┘
+```
+
+## Prerequisites
+
+- AWS Account with Organizations (for multi-account)
+- Amazon SES configured (verified email/domain)
+- S3 bucket for Lambda code storage
+
+## Quick Start
+
+### 1. Prepare S3 Bucket
+
+```bash
+BUCKET_NAME="asa-iam-rotation-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+aws s3 mb s3://$BUCKET_NAME --region $AWS_REGION
+
+aws s3 cp Lambda/ s3://$BUCKET_NAME/asa/asa-iam-rotation/Lambda/ --recursive
+aws s3 cp template/ s3://$BUCKET_NAME/asa/asa-iam-rotation/Template/ --recursive
+```
+
+### 2. Verify SES Email
+
+```bash
+aws ses verify-email-identity --email-address your-email@example.com --region $AWS_REGION
+```
+
+### 3. Deploy CloudFormation Stacks
+
+```bash
+# Main Solution
+aws cloudformation deploy \
+  --template-file CloudFormation/ASA-iam-key-auto-rotation-and-notifier-solution.yaml \
+  --stack-name iam-key-auto-rotation \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    S3BucketName="$BUCKET_NAME" \
+    S3BucketPrefix="asa/asa-iam-rotation" \
+    AdminEmailAddress="your-email@example.com" \
+    AWSOrgID="o-xxxxxxxxxx" \
+    OrgListAccount="$AWS_ACCOUNT_ID" \
+    DryRunFlag="True"
+
+# List Accounts Role
+aws cloudformation deploy \
+  --template-file CloudFormation/ASA-iam-key-auto-rotation-list-accounts-role.yaml \
+  --stack-name iam-key-rotation-list-accounts-role \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    PrimaryAccountID="$AWS_ACCOUNT_ID"
+
+# IAM Assumed Roles
+aws cloudformation deploy \
+  --template-file CloudFormation/ASA-iam-key-auto-rotation-iam-assumed-roles.yaml \
+  --stack-name iam-key-rotation-assumed-roles \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    PrimaryAccountID="$AWS_ACCOUNT_ID" \
+    AWSOrgID="o-xxxxxxxxxx"
+```
+
+Or use the deployment script:
+
+```bash
+./scripts/deploy.sh <AWS_REGION> <ADMIN_EMAIL> <ORG_ID>
+```
+
+## Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `DryRunFlag` | True | Audit mode (True) or Enforcement mode (False) |
+| `RotationPeriod` | 90 | Days before key rotation |
+| `InactivePeriod` | 100 | Days before key deactivation |
+| `RecoveryGracePeriod` | 10 | Grace period before deletion |
+
+## Testing
+
+Test rotation in audit mode:
+
+```bash
+aws lambda invoke \
+  --function-name ASA-IAM-Access-Key-Rotation-Function \
+  --payload '{"account": "123456789012", "email": "user@example.com", "name": "my-account"}' \
+  output.json
+```
+
+Force rotation for specific user:
+
+```bash
+aws lambda invoke \
+  --function-name ASA-IAM-Access-Key-Rotation-Function \
+  --payload '{"account": "123456789012", "email": "user@example.com", "name": "my-account", "ForceRotate": "username"}' \
+  output.json
+```
+
+## Retrieving Rotated Keys
+
+New keys are stored in AWS Secrets Manager:
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id Account_${ACCOUNT_ID}_User_${USERNAME}_AccessKey \
+  --query SecretString --output text
+```
+
+## Project Structure
+
+```
+├── CloudFormation/
+│   ├── ASA-iam-key-auto-rotation-and-notifier-solution.yaml
+│   ├── ASA-iam-key-auto-rotation-iam-assumed-roles.yaml
+│   ├── ASA-iam-key-auto-rotation-list-accounts-role.yaml
+│   └── ASA-iam-key-auto-rotation-vpc-endpoints.yaml
+├── Lambda/
+│   ├── account_inventory.zip
+│   ├── access_key_auto_rotation.zip
+│   └── notifier.zip
+├── scripts/
+│   ├── deploy.sh
+│   └── cleanup.sh
+├── template/
+│   └── iam-auto-key-rotation-enforcement.html
+├── tests/
+│   └── *.json
+└── Docs/
+    └── ASA IAM Key Rotation Runbook(v3).pdf
+```
+
+## Exempting Users
+
+Create an IAM Group named `IAMKeyRotationExemptionGroup` and add users to exempt from rotation.
+
+## Documentation
+
+See [Docs/ASA IAM Key Rotation Runbook(v3).pdf](Docs/ASA%20IAM%20Key%20Rotation%20Runbook(v3).pdf) for detailed documentation.
 
 ## Security
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+
+See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for security issue notifications.
 
 ## License
-This library is licensed under the MIT-0 License. See the LICENSE file.
 
-## Deployment Notes
-**AWS IAM Key Rotation Runbook**
-- Runbook located under asa-iam-rotation/Docs/ASA IAM Key Rotation Runbook(v3)
-
-**Simple Email Service (SES) Setup:**
-1. Move the Amazon Simple Email Service (SES) service out of sandbox mode<br/>
-a.	https://docs.aws.amazon.com/ses/latest/DeveloperGuide/request-production-access.html<br/>
-b.	Note: There is about a 24 hour wait for approval
-2. While in Amazon Simple Email Service (SES), verify the senders address or the sender domain that you will use as the email source.<br/>
-a.	This is the email that will be in the ‘Sender’ section of the email sent to your end users.
-3. The AWS resources needed for this tool will deploy with the main CloudFormation template.
+This library is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.
