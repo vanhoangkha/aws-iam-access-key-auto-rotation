@@ -1,63 +1,70 @@
 # AWS IAM Access Key Auto-Rotation
 
-Automated solution for rotating AWS IAM User Access Keys following security best practices.
+[![License: MIT-0](https://img.shields.io/badge/License-MIT--0-yellow.svg)](https://opensource.org/licenses/MIT-0)
+[![AWS](https://img.shields.io/badge/AWS-CloudFormation-orange)](https://aws.amazon.com/cloudformation/)
+[![Python](https://img.shields.io/badge/Python-3.13-blue)](https://www.python.org/)
 
-## Overview
+Automated AWS IAM access key rotation solution using Lambda, Secrets Manager, and CloudFormation. Enforce security best practices by automatically rotating, disabling, and deleting IAM user access keys based on configurable policies.
 
-This solution automatically manages IAM Access Key lifecycle:
+## Features
 
-| Day | Action |
-|-----|--------|
-| 90 | Rotate - Create new key, store in Secrets Manager |
-| 100 | Disable - Deactivate old key |
-| 110 | Delete - Remove old key permanently |
+- **Automated Key Lifecycle Management** - Rotate keys at 90 days, disable at 100 days, delete at 110 days
+- **Multi-Account Support** - Works across AWS Organizations with cross-account IAM roles
+- **Secure Key Storage** - New credentials stored encrypted in AWS Secrets Manager
+- **Email Notifications** - Alert users via Amazon SES before and after key actions
+- **Audit Mode** - Test the solution without making changes (DryRun)
+- **Exemption Support** - Exclude specific users via IAM group membership
+- **VPC Support** - Optional deployment within VPC for enhanced security
+
+## How It Works
+
+| Day | Action | Description |
+|-----|--------|-------------|
+| 90 | **Rotate** | Create new access key, store in Secrets Manager |
+| 100 | **Disable** | Deactivate old access key |
+| 110 | **Delete** | Permanently remove old access key |
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│  EventBridge    │────▶│  Account Inventory   │────▶│  Key Rotation   │
-│  (24h schedule) │     │  Lambda              │     │  Lambda         │
-└─────────────────┘     └──────────────────────┘     └────────┬────────┘
-                                                              │
-                        ┌──────────────────────┐              │
-                        │  Notifier Lambda     │◀─────────────┤
-                        │  (SES Email)         │              │
-                        └──────────────────────┘              ▼
-                                                     ┌─────────────────┐
-                                                     │ Secrets Manager │
-                                                     │ (New Keys)      │
-                                                     └─────────────────┘
+EventBridge (24h) → Account Inventory Lambda → Key Rotation Lambda → Secrets Manager
+                                                       ↓
+                                              Notifier Lambda (SES)
 ```
 
 ## Prerequisites
 
-- AWS Account with Organizations (for multi-account)
-- Amazon SES configured (verified email/domain)
-- S3 bucket for Lambda code storage
+- AWS Account with [AWS Organizations](https://aws.amazon.com/organizations/) enabled
+- [Amazon SES](https://aws.amazon.com/ses/) configured with verified email/domain
+- AWS CLI configured with appropriate permissions
 
 ## Quick Start
 
-### 1. Prepare S3 Bucket
+### Option 1: Using Deploy Script
 
 ```bash
-BUCKET_NAME="asa-iam-rotation-${AWS_ACCOUNT_ID}-${AWS_REGION}"
-aws s3 mb s3://$BUCKET_NAME --region $AWS_REGION
+git clone https://github.com/vanhoangkha/aws-iam-access-key-auto-rotation.git
+cd aws-iam-access-key-auto-rotation
+./scripts/deploy.sh us-east-1 admin@example.com o-xxxxxxxxxx
+```
 
+### Option 2: Manual Deployment
+
+```bash
+# Set variables
+export AWS_REGION="us-east-1"
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export BUCKET_NAME="asa-iam-rotation-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+
+# Create S3 bucket and upload code
+aws s3 mb s3://$BUCKET_NAME --region $AWS_REGION
 aws s3 cp Lambda/ s3://$BUCKET_NAME/asa/asa-iam-rotation/Lambda/ --recursive
 aws s3 cp template/ s3://$BUCKET_NAME/asa/asa-iam-rotation/Template/ --recursive
-```
 
-### 2. Verify SES Email
+# Verify SES email
+aws ses verify-email-identity --email-address admin@example.com --region $AWS_REGION
 
-```bash
-aws ses verify-email-identity --email-address your-email@example.com --region $AWS_REGION
-```
-
-### 3. Deploy CloudFormation Stacks
-
-```bash
-# Main Solution
+# Deploy CloudFormation stacks
 aws cloudformation deploy \
   --template-file CloudFormation/ASA-iam-key-auto-rotation-and-notifier-solution.yaml \
   --stack-name iam-key-auto-rotation \
@@ -65,109 +72,91 @@ aws cloudformation deploy \
   --parameter-overrides \
     S3BucketName="$BUCKET_NAME" \
     S3BucketPrefix="asa/asa-iam-rotation" \
-    AdminEmailAddress="your-email@example.com" \
+    AdminEmailAddress="admin@example.com" \
     AWSOrgID="o-xxxxxxxxxx" \
     OrgListAccount="$AWS_ACCOUNT_ID" \
     DryRunFlag="True"
-
-# List Accounts Role
-aws cloudformation deploy \
-  --template-file CloudFormation/ASA-iam-key-auto-rotation-list-accounts-role.yaml \
-  --stack-name iam-key-rotation-list-accounts-role \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    PrimaryAccountID="$AWS_ACCOUNT_ID"
-
-# IAM Assumed Roles
-aws cloudformation deploy \
-  --template-file CloudFormation/ASA-iam-key-auto-rotation-iam-assumed-roles.yaml \
-  --stack-name iam-key-rotation-assumed-roles \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    PrimaryAccountID="$AWS_ACCOUNT_ID" \
-    AWSOrgID="o-xxxxxxxxxx"
-```
-
-Or use the deployment script:
-
-```bash
-./scripts/deploy.sh <AWS_REGION> <ADMIN_EMAIL> <ORG_ID>
 ```
 
 ## Configuration
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `DryRunFlag` | True | Audit mode (True) or Enforcement mode (False) |
-| `RotationPeriod` | 90 | Days before key rotation |
-| `InactivePeriod` | 100 | Days before key deactivation |
-| `RecoveryGracePeriod` | 10 | Grace period before deletion |
+| `DryRunFlag` | `True` | `True` = Audit mode (notifications only), `False` = Enforcement mode |
+| `RotationPeriod` | `90` | Days before access key rotation |
+| `InactivePeriod` | `100` | Days before access key deactivation |
+| `RecoveryGracePeriod` | `10` | Grace period before permanent deletion |
 
-## Testing
+## Usage
 
-Test rotation in audit mode:
+### Test in Audit Mode
 
 ```bash
 aws lambda invoke \
   --function-name ASA-IAM-Access-Key-Rotation-Function \
   --payload '{"account": "123456789012", "email": "user@example.com", "name": "my-account"}' \
+  --cli-binary-format raw-in-base64-out \
   output.json
 ```
 
-Force rotation for specific user:
+### Force Rotate Specific User
 
 ```bash
 aws lambda invoke \
   --function-name ASA-IAM-Access-Key-Rotation-Function \
   --payload '{"account": "123456789012", "email": "user@example.com", "name": "my-account", "ForceRotate": "username"}' \
+  --cli-binary-format raw-in-base64-out \
   output.json
 ```
 
-## Retrieving Rotated Keys
-
-New keys are stored in AWS Secrets Manager:
+### Retrieve Rotated Keys
 
 ```bash
 aws secretsmanager get-secret-value \
-  --secret-id Account_${ACCOUNT_ID}_User_${USERNAME}_AccessKey \
+  --secret-id Account_123456789012_User_username_AccessKey \
   --query SecretString --output text
-```
-
-## Project Structure
-
-```
-├── CloudFormation/
-│   ├── ASA-iam-key-auto-rotation-and-notifier-solution.yaml
-│   ├── ASA-iam-key-auto-rotation-iam-assumed-roles.yaml
-│   ├── ASA-iam-key-auto-rotation-list-accounts-role.yaml
-│   └── ASA-iam-key-auto-rotation-vpc-endpoints.yaml
-├── Lambda/
-│   ├── account_inventory.zip
-│   ├── access_key_auto_rotation.zip
-│   └── notifier.zip
-├── scripts/
-│   ├── deploy.sh
-│   └── cleanup.sh
-├── template/
-│   └── iam-auto-key-rotation-enforcement.html
-├── tests/
-│   └── *.json
-└── Docs/
-    └── ASA IAM Key Rotation Runbook(v3).pdf
 ```
 
 ## Exempting Users
 
-Create an IAM Group named `IAMKeyRotationExemptionGroup` and add users to exempt from rotation.
+Add users to the `IAMKeyRotationExemptionGroup` IAM group to exclude them from automatic rotation.
 
-## Documentation
+## Project Structure
 
-See [Docs/ASA IAM Key Rotation Runbook(v3).pdf](Docs/ASA%20IAM%20Key%20Rotation%20Runbook(v3).pdf) for detailed documentation.
+```
+├── CloudFormation/          # Infrastructure as Code templates
+├── Lambda/                  # Lambda function packages
+├── scripts/                 # Deployment and cleanup scripts
+├── template/                # Email notification templates
+├── tests/                   # Test event payloads
+└── Docs/                    # Documentation
+```
 
 ## Security
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for security issue notifications.
+This solution follows AWS security best practices:
+
+- IAM roles use least privilege permissions
+- Secrets stored encrypted in AWS Secrets Manager
+- Support for VPC deployment with private endpoints
+- Configurable key rotation policies
+
+For security issues, see [CONTRIBUTING.md](CONTRIBUTING.md#security-issue-notifications).
+
+## Related Resources
+
+- [AWS IAM Best Practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
+- [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/)
+- [Rotating IAM Access Keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_RotateAccessKey)
+
+## Contributing
+
+Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-This library is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.
+This project is licensed under the MIT-0 License - see the [LICENSE](LICENSE) file for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
