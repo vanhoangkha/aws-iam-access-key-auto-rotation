@@ -26,7 +26,23 @@ Automated AWS IAM access key rotation solution using Lambda, Secrets Manager, an
 
 ## Architecture
 
-![Architecture Diagram](docs/architecture.png)
+```mermaid
+flowchart LR
+    schedule[EventBridge schedule] --> inventory[Account inventory Lambda]
+    inventory --> org[AWS Organizations]
+    inventory --> rotation[Rotation Lambda]
+    rotation --> iam[IAM users and access keys]
+    rotation --> secrets[Secrets Manager]
+    rotation --> notifier[Notifier Lambda]
+    notifier --> ses[Amazon SES]
+    ses --> users[Key owners and admins]
+
+    subgraph Member accounts
+        iam
+    end
+```
+
+The solution runs on a scheduled control loop. It discovers accounts, evaluates IAM user access keys against the configured age thresholds, creates replacement keys when needed, stores new credentials in Secrets Manager, and notifies key owners before disabling or deleting old keys.
 
 ## Prerequisites
 
@@ -128,7 +144,7 @@ Add users to the `IAMKeyRotationExemptionGroup` IAM group to exclude them from a
 └── Docs/                    # Documentation
 ```
 
-## Security
+## Security Model
 
 This solution follows AWS security best practices:
 
@@ -136,6 +152,8 @@ This solution follows AWS security best practices:
 - Secrets stored encrypted in AWS Secrets Manager
 - Support for VPC deployment with private endpoints
 - Configurable key rotation policies
+- Dry-run mode for safe rollout before enforcement
+- User exemption group for documented break-glass exceptions
 
 For security issues, see [CONTRIBUTING.md](CONTRIBUTING.md#security-issue-notifications).
 
