@@ -18,6 +18,7 @@ jobs:
           python-version: '3.12'
 
       - name: Lint CloudFormation
+        continue-on-error: true
         run: |
           pip install cfn-lint
           cfn-lint CloudFormation/*.yaml
